@@ -1,4 +1,6 @@
-<h1 align="center">Strata</h1>
+<h1 align="center">Strata-JEV</h1>
+
+<p align="center"><b>A fork of <a href="https://github.com/Niko1221/Strata">Strata</a> adding JEV mode: parallel decisions in ~10 ms + a model-swarm router.</b></p>
 
 **English** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · [Español](README.es.md) · [Português](README.pt-BR.md)
 
@@ -12,6 +14,21 @@ NVIDIA or AMD graphics card (12 GB or more) · Windows or Linux · free and open
 Strata runs **[Qwen3.8-Flash-Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Next)** on a normal PC. This is a
 large, smart AI model that usually needs a server. It chats, writes code, reads pictures and works with your apps
 and coding agents. Nothing leaves your PC.
+
+## Credits - this fork stands on two people's work
+
+**[Niko](https://github.com/Niko1221)** built **[Strata](https://github.com/Niko1221/Strata)**, the engine everything here runs on:
+a from-scratch inference engine that fits a 125-billion-parameter MoE model onto an ordinary gaming GPU, with
+one-click Windows/Linux install and a full OpenAI-compatible API - 18k+ stars, MIT-licensed. Every feature in this fork
+is bolted onto Niko's engine; go show him a star.
+
+**[Anirban Kar](https://github.com/thecodacus)** (YouTube: **[@Codacus](https://www.youtube.com/@Codacus)**) built the
+[`parallel-decision` branch of llama.cpp](https://github.com/thecodacus/llama.cpp) - the JEV mechanism itself:
+every allowed answer scored as a token path in one batched pass, so all decisions arrive together in tens of
+milliseconds and structured output can never be malformed. Without his endpoint - and his
+[videos](https://www.youtube.com/watch?v=bcGO7xre46o) explaining it - this fork would not exist.
+
+This is an independent community integration, not affiliated with either author. Both projects are MIT-licensed; all credit to them.
 
 ## Jev mode - answers that choose instead of write (this fork)
 
