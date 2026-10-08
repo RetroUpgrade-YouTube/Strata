@@ -97,3 +97,31 @@ the process; the codacus llama.cpp server is launched per model request the same
 - Strata: start as usual when you want the big agent; Jev reflex backend = `C:\AI\Strata-Jev\start-jev-backend.bat`.
 - LM Studio's server (:1234) and the router should not both hold models - pick one.
 
+## Router-managed Strata (full auto-swap, always-on endpoint)
+
+`strata` is now a model in the pool: `cmd = .venv python setup.py --port ${PORT} --no-browser --yes`,
+tree-killed via `cmdStop: taskkill /F /T /PID`. The matrix may evict it for Qwen-27b, ComfyUI video,
+or the gemma swarm sets; requesting `strata` again reloads it automatically (minutes - 70 GB MoE),
+so **the endpoint :8081 is always up**: worst case is a slow first token, never a dead backend.
+
+- DSH default model = `llama-swap / hot-small`: every session starts on an instant small model;
+  escalate by switching the session's model to `strata` (same URL - router swaps brains for you).
+- Matrix: set `brain: s & e2b` lets Strata + E2B coexist; evict cost `s: 90` keeps it resident
+  unless a request genuinely needs its VRAM. ttl 3600.
+- Cutover: restart DSH web to pick up settings.yaml, then STOP launching START-HERE.bat by hand -
+  the router owns Strata now (double-loading = OOM). Direct :8080 stays valid only for manual mode.
+- Media sessions are brain killers: queueing MiniMax H3 video evicts Strata; a DSH session running
+  on `strata` pauses until its next request reloads the model (~4 min). Run media in dedicated sessions.
+
+## Jev decisions through the router
+
+Any loaded pool model answers decisions via passthrough - no fixed ports:
+
+```bash
+curl http://localhost:8081/upstream/gemma-e2b/v1/decision   # small-model reflex
+curl http://localhost:8081/upstream/strata/v1/decision      # big-brain tie-breaker (loads it if needed)
+```
+
+The dedicated :8096 Qwen3.5-2B backend remains the fastest path for sessions on direct Strata (:8080).
+
+
