@@ -207,6 +207,17 @@ python tools/jev_cursor_demo.py --targets "400,300" --click             # real l
 verdict-gated. Swap `WindowFromPoint` for a screenshot tile or game pixel readout and the same loop
 drives any visual agent.
 
+**`tools/jev_start_menu_demo.py`** - watch-it-run version: finds every taskbar's Start button across
+monitors (DPI-aware), flies the cursor to each, asks the reflex in one parallel call, clicks the
+sure/confident ones and closes the menu with Esc after a preview delay. Real multi-monitor output:
+
+```
+found 2 Start button(s): (1387,1416) [primary], (3632,1656) [secondary]
+one parallel reflex call for 2 points in 597 ms (incl. cursor moves):
+  (1387,1416) over_button=true at 71.3% ... | click_now=true at 89.2% -> sure | action="click" -> sure
+    -> CLICKED [sure] - start menu opening NOW on that monitor
+```
+
 ## Native engine roadmap (Jev scored by Strata's own engine)
 
 Scoring by Strata's engine itself (one model in memory, no second process) is a real option; the
