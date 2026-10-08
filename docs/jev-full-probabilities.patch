@@ -1,0 +1,21 @@
+diff --git a/tools/parallel-decision/decision-engine.cpp b/tools/parallel-decision/decision-engine.cpp
+index c0f1d6500..fed5ee6b1 100644
+--- a/tools/parallel-decision/decision-engine.cpp
++++ b/tools/parallel-decision/decision-engine.cpp
+@@ -740,6 +740,16 @@ common_json assemble(const compiled_schema & cs, const result & r) {
+         f["probability"]  = (double) (fr.probs.size() == sp.values.size() ? fr.probs[idx] : fr.path_score);
+         f["scored_nodes"] = fr.scored_nodes;
+         f["tree"]         = fr.tree;
++        if (fr.probs.size() == sp.values.size()) {
++            common_json probs = common_json::array(); // full constrained distribution over every allowed value
++            for (size_t k = 0; k < sp.values.size(); ++k) {
++                common_json pv = common_json::object();
++                pv["value"]       = sp.values[k];
++                pv["probability"] = (double) fr.probs[k];
++                probs.push_back(pv);
++            }
++            f["probabilities"] = std::move(probs);
++        }
+         fields[sp.name]   = f;
+     }
+     common_json out = common_json::object();

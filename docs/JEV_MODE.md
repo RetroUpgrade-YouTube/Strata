@@ -151,9 +151,28 @@ skill teaches every session when to reach for them.
                "connection refused on 8080; no process listening."] }
 ```
 
-Answer: `{decisions: [...], fields: [{value, probability}], timings}` - e.g.
-`is_safe=true(0.997), service=running(0.799), reach=online(0.988)` for context 1 and
-`service=stopped(0.994), reach=offline(0.998)` for context 2, ~30 ms each.
+Answer: `{decisions: [...], fields: [...], verdicts: [...], timings}`. **Agents should read
+`verdicts`** - one entry per field with the chosen value + its percentage, the **runner-up's value and
+its percentage**, the gap between them (`margin`) and a `confidence` label:
+
+| margin (top1 − top2) | confidence | what your agent should do |
+|---|---|---|
+| >= 50 pts | `sure` | act on it, no second opinion needed |
+| >= 20 pts | `confident` | act; note the odds in logs |
+| >= 10 pts | `likely` | fine for cheap/reversible actions |
+| < 10 pts  | `coin_flip` | **the model barely separated the options** - verify, re-ask with a sharper context, or escalate to a bigger model |
+
+Real output from `tools/jev_decide_demo.py`:
+
+```
+is_safe=false at 73.0%, runner-up true at 27.0% -> confident
+service="stopped" at 99.4%, runner-up "running" at 0.6% -> sure
+```
+
+A 21% winner among five ~20% options is answered with the winner but labeled `coin_flip`: the tool
+answers confidently **and** tells you it isn't - so a dumb agent can escalate instead of acting blind.
+`fields[].probabilities` carries the exact probability of every allowed value (tree mode); greedy mode
+scores only the chosen path, so margins are lower bounds marked with `~` (e.g. `confident~`).
 
 **Rules a strict backend enforces (violations answer with a clear error):** every field needs a
 `description`; types are only enum/boolean/integer(min,max)/number(min,max,step); values must be

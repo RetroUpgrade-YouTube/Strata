@@ -57,9 +57,11 @@ def main() -> int:
     print("isError:", res.get("isError"))
     try:
         out = json.loads(text)
-        for ctx, dec, fields in zip(arguments["contexts"], out.get("decisions", []), out.get("fields", [])):
-            probs = ", ".join(f"{k}={v['value']}({round(v['probability'], 3)})" for k, v in fields.items())
-            print(f"[{ctx[:40]}...] -> {probs}")
+        # verdicts: per field the chosen value + probability, runner-up + its probability, margin, confidence
+        for ctx, verdicts in zip(arguments["contexts"], out.get("verdicts", [])):
+            print(f"[{ctx[:40]}...]")
+            for v in verdicts.values():
+                print("   ", v["line"])
         print(out.get("summary"))
     except ValueError:
         print(text)   # an error message from the server (e.g. backend not running: start-jev-backend.bat)

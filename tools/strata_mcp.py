@@ -1046,7 +1046,9 @@ def tool_defs(models: dict, families: dict, contexts: list) -> list:
                         "endpoint and its decision backend running. schema: one entry per field as "
                         "{\"type\": \"enum\", \"choices\": [...], \"description\": \"...\"}, boolean, integer "
                         "(minimum, maximum) or number (minimum, maximum, step); every field needs a description. "
-                        "Read-only.",
+                        "Every answer carries a verdict: chosen value + probability, runner-up value + its "
+                        "probability, their margin and a confidence label - sure/confident/likely/coin_flip; on "
+                        "coin_flip the model barely separated the options, so verify before acting. Read-only.",
          "inputSchema": {"type": "object", "additionalProperties": False, "properties": {
              "port": port,
              "instructions": {"type": "string", "description": "short system text: what the questions mean"},
@@ -1561,12 +1563,50 @@ class Tools:
         results = r.get("results") or []
         tm = r.get("timings") or {}
         per = round(tm["per_decision_ms"], 1) if isinstance(tm.get("per_decision_ms"), (int, float)) else None
+
+        def label(margin, exact):
+            base = ("sure" if margin >= 0.50 else "confident" if margin >= 0.20
+                    else "likely" if margin >= 0.10 else "coin_flip")
+            return base if exact else base + "~"   # ~: lower bound (greedy mode scores only the winner)
+
+        verdicts_all = []
+        for res in results:
+            per_field = {}
+            for name, info in (res.get("fields") or {}).items():
+                p = float(info.get("probability") or 0.0)
+                dist = [d for d in (info.get("probabilities") or []) if isinstance(d, dict)]
+                runner_v, runner_p, exact = None, 0.0, False
+                if len(dist) > 1:
+                    scored = sorted((float(d.get("probability") or 0.0), d.get("value")) for d in dist)
+                    rest = [s for s in scored if s[1] != info.get("value")]
+                    runner_p, runner_v = (rest[-1] if rest else (0.0, None))
+                    margin, exact = scored[-1][0] - runner_p, True
+                else:
+                    margin = max(0.0, 2*p - 1)   # lower bound: worst case is all the rest on one value
+                v = {"value": info.get("value"), "probability": round(p, 4),
+                     "pct": f"{round(p*100, 1)}%", "margin": round(margin, 4),
+                     "confidence": label(margin, exact)}
+                if runner_v is not None:
+                    v["runner_up"] = {"value": runner_v, "probability": round(runner_p, 4),
+                                      "pct": f"{round(runner_p*100, 1)}%"}
+                    line = (f"{name}={json.dumps(info.get('value'))} at {v['pct']}, runner-up "
+                            f"{json.dumps(runner_v)} at {v['runner_up']['pct']}")
+                else:
+                    line = f"{name}={json.dumps(info.get('value'))} at {v['pct']}"
+                v["line"] = line + " -> " + v["confidence"]
+                if v["confidence"].startswith("coin_flip"):
+                    v["hint"] = "top two are within 10 points: treat as unsure - sharpen the context or schema"
+                per_field[name] = v
+            verdicts_all.append(per_field)
+
         out = {"decisions": [x.get("decision") for x in results],
                "fields": [x.get("fields") for x in results],
+               "verdicts": verdicts_all,
                "timings": tm, "usage": r.get("usage")}
         out["summary"] = (f"{len(results)} decision(s) answered by choosing from the schema's allowed values"
                           + (f", {per} ms per decision" if per is not None else "")
-                          + "; every field carries its probability")
+                          + "; each field carries a verdict: chosen value, probability, runner-up, margin and "
+                            "confidence - sure >=50 pts / confident >=20 / likely >=10 / coin_flip below 10")
         return out
 
     # ---- strata_connect_info
