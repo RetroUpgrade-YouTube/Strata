@@ -1038,6 +1038,24 @@ def tool_defs(models: dict, families: dict, contexts: list) -> list:
                         "Codex CLI, the OpenAI SDK, curl, Cursor/Continue/Open WebUI. Read-only.",
          "inputSchema": {"type": "object", "additionalProperties": False, "properties": {"port": port}},
          "annotations": ro},
+        {"name": "strata_decide", "title": "Jev decision (choose, not write)",
+         "description": "Jev mode: answer questions whose every answer is one of a fixed set - it PICKS per field "
+                        "and returns probabilities in tens of milliseconds instead of writing text. Use it for "
+                        "safety yes/no gates, status checks (running/stopped, online/offline), routing, triage, "
+                        "classification - over 1-256 states at once. Needs the Strata Jev fork's /v1/decision "
+                        "endpoint and its decision backend running. schema: one entry per field as "
+                        "{\"type\": \"enum\", \"choices\": [...], \"description\": \"...\"}, boolean, integer "
+                        "(minimum, maximum) or number (minimum, maximum, step); every field needs a description. "
+                        "Read-only.",
+         "inputSchema": {"type": "object", "additionalProperties": False, "properties": {
+             "port": port,
+             "instructions": {"type": "string", "description": "short system text: what the questions mean"},
+             "schema": {"type": "object", "description": "the finite fields to answer (enum/boolean/integer/number)"},
+             "contexts": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 256,
+                          "description": "the state texts; one decision per entry"},
+             "mode": {"type": "string", "enum": ["auto", "tree", "greedy"],
+                      "description": "tree = exact probabilities for every value (default auto)"}}},
+         "annotations": ro},
     ]
 
 
@@ -1509,6 +1527,46 @@ class Tools:
                           + f", {wall:.1f} s in total")
         out["note"] = ("output speed depends on the context length, the GPU's free VRAM and what else the PC does; "
                        "the first request after a start is slower")
+        return out
+
+    # ---- strata_decide (Jev mode)
+
+    def strata_decide(self, port=None, instructions="", schema=None, contexts=None, mode=None) -> dict:
+        s = self.s
+        if not isinstance(schema, dict) or not schema:
+            raise ToolError("schema must be a non-empty object of finite fields (enum/boolean/integer/number), "
+                            "each with a description")
+        if not isinstance(contexts, list) or not 1 <= len(contexts) <= 256 \
+                or not all(isinstance(c, str) for c in contexts):
+            raise ToolError("contexts must be a list of 1-256 strings: the states to decide about")
+        target = None
+        for p in s.ports(port):
+            info = s.probe(p, deep=False)
+            if info and not info.get("other"):
+                target = info
+                break
+        if target is None:
+            raise ToolError("Strata is not running: start it first (strata_start)")
+        p = target["port"]
+        key = s.api_key_for(p)
+        body = {"instructions": str(instructions or ""), "schema": schema, "contexts": contexts}
+        if mode in ("auto", "tree", "greedy"):
+            body["mode"] = mode
+        st, r = http_json(f"http://127.0.0.1:{p}/v1/decision", "POST", body, api_key=key, timeout=120)
+        if st == 404:
+            raise ToolError("this Strata server has no /v1/decision (Jev mode needs the Jev fork + its decision backend)")
+        if st != 200 or not isinstance(r, dict):
+            msg = (r.get("error") or {}).get("message") if isinstance(r, dict) else None
+            raise ToolError(f"the decision request failed (HTTP {st}): {msg or 'no answer'}")
+        results = r.get("results") or []
+        tm = r.get("timings") or {}
+        per = round(tm["per_decision_ms"], 1) if isinstance(tm.get("per_decision_ms"), (int, float)) else None
+        out = {"decisions": [x.get("decision") for x in results],
+               "fields": [x.get("fields") for x in results],
+               "timings": tm, "usage": r.get("usage")}
+        out["summary"] = (f"{len(results)} decision(s) answered by choosing from the schema's allowed values"
+                          + (f", {per} ms per decision" if per is not None else "")
+                          + "; every field carries its probability")
         return out
 
     # ---- strata_connect_info

@@ -118,6 +118,51 @@ with it).
   be finite (no free text); a low `probability` is honest uncertainty - the pick may simply be a
   close call, not a bug.
 
+## Using it from other AI tools (MCP): `strata_decide`
+
+`tools/strata_mcp.py` is a stdio MCP server (stdlib Python, no setup needed). Besides managing Strata
+(status/start/stop/logs/benchmark) it now serves **`strata_decide`**: the Jev reflex as one tool call.
+Any MCP-capable agent can use it - copy-paste setups:
+
+**Claude Code:**  `claude mcp add strata -- python C:\AI\Strata-Jev\tools\strata_mcp.py`
+
+**Claude Desktop / Cursor (json):**
+
+```json
+{ "mcpServers": { "strata": { "command": "python",
+                   "args": ["C:\\AI\\Strata-Jev\\tools\\strata_mcp.py"] } } }
+```
+
+(VS Code uses `"servers"` with `"type": "stdio"`; Cursor: `.cursor/mcp.json`, Claude Desktop:
+`claude_desktop_config.json`.). **DeepSeek Harness:** pick the **Jev mode reflex** preset - it mounts
+this server as native tools (`mcp__strata__decide`, `mcp__strata__status`, ...) and the `jev-reflex`
+skill teaches every session when to reach for them.
+
+**Call payload (the whole contract - works verbatim in any client):**
+
+```json
+{ "instructions": "Answer each question about this machine's state.",
+  "schema": {
+    "is_safe": {"type": "boolean", "description": "Is it safe to run the update now?"},
+    "service": {"type": "enum", "choices": ["running","stopped"], "description": "Is strata running or stopped?"},
+    "reach":   {"type": "enum", "choices": ["online","offline"], "description": "Is the server reachable?"}
+  },
+  "contexts": ["GET /health answered 200 in 3 ms; GPU idle; no jobs queued.",
+               "connection refused on 8080; no process listening."] }
+```
+
+Answer: `{decisions: [...], fields: [{value, probability}], timings}` - e.g.
+`is_safe=true(0.997), service=running(0.799), reach=online(0.988)` for context 1 and
+`service=stopped(0.994), reach=offline(0.998)` for context 2, ~30 ms each.
+
+**Rules a strict backend enforces (violations answer with a clear error):** every field needs a
+`description`; types are only enum/boolean/integer(min,max)/number(min,max,step); values must be
+finite; `contexts` = 1-256 strings. A low probability is a close call, not a failure.
+
+A runnable example client: **`tools/jev_decide_demo.py`** (`python tools/jev_decide_demo.py`) - the
+three messages that matter are initialize -> tools/list -> tools/call; copy it into any app.
+
+
 ## Native engine roadmap (Jev scored by Strata's own engine)
 
 Scoring by Strata's engine itself (one model in memory, no second process) is a real option; the
