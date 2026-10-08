@@ -182,6 +182,31 @@ A runnable example client: **`tools/jev_decide_demo.py`** (`python tools/jev_dec
 three messages that matter are initialize -> tools/list -> tools/call; copy it into any app.
 
 
+## Real-time control loops (visual browsing, games, on-site navigation)
+
+Actions that need many small decisions per second - move a pointer, "is it over the button?",
+click/wait/keep moving, game controls - run as a **reflex loop in a sub-agent**, not on the big model:
+
+1. Each tick probes N target states (e.g. `WindowFromPoint` class + title under each point - dry-run
+   needs NO cursor movement, your mouse stays free).
+2. **ONE** Jev call scores all N points x all fields in a single parallel decode (~50-100 ms for
+   several points; up to 256 contexts per call) - `over_button`, `click_now`, `action` answered together.
+3. Act only on `sure`/`confident`. A `coin_flip` means the reflex is blind there: re-scan with a sharper
+   context (screenshot region, control name) or hand that point to the smarter model - never act blind.
+
+Delegation split: the big model does screenshots, target discovery, strategy and coin_flips; the loop
+runs the frames at ~10 ticks/s. The LLM never writes prose in between - it picks from finite sets -
+which is what makes visual browsing noticeably faster.
+
+```bash
+python tools/jev_cursor_demo.py --targets "400,300;960,540" --ticks 3   # dry-run: touches nothing
+python tools/jev_cursor_demo.py --targets "400,300" --click             # real left-clicks on sure/confident click_now
+```
+
+**`tools/jev_cursor_demo.py`** is the runnable Windows demo (stdlib only): probe -> decide -> act,
+verdict-gated. Swap `WindowFromPoint` for a screenshot tile or game pixel readout and the same loop
+drives any visual agent.
+
 ## Native engine roadmap (Jev scored by Strata's own engine)
 
 Scoring by Strata's engine itself (one model in memory, no second process) is a real option; the
