@@ -2621,6 +2621,11 @@ class Service:
         # "*" = any), and every name it answers to, which serve() works out from the address it listens on
         self.allowed_hosts: list[str] = []
         self.host_names: set[str] = set(LOOPBACK_NAMES)
+        # Jev mode (/v1/decision): a proxied decision backend - llama-server from the parallel-decision branch
+        # (github.com/thecodacus/llama.cpp), started with --decision-seqs N; main() fills these from the config,
+        # --decision-url or $STRATA_DECISION_URL.  Empty = the endpoint answers 503 with setup help.  docs/JEV_MODE.md
+        self.decision_url = ""
+        self.decision_timeout_s = 120.0
         self.status = {"busy": False, "queued": 0}      # GET /status: what the model is doing right now
         self.rate = collections.deque(maxlen=32)        # (time, generated) samples for the live tok/s window
         # "parallel" (the engine's batch slots): every running request's own status and rate window; self.status
@@ -3132,7 +3137,9 @@ class Service:
             # one request at a time (more wait their turn), or "parallel": N batch slots (#465)
             "concurrency": {"serving": max(1, int(getattr(self.engine, "batch", 0) or 0)),
                             "requested": max(1, int(getattr(self.engine, "batch", 0) or 0))},
-            "dialects": ["/v1/chat/completions", "/v1/messages", "/v1/responses"],
+            "dialects": ["/v1/chat/completions", "/v1/messages", "/v1/responses"] + (["/v1/decision"] if self.decision_url else []),
+            "decision": {"enabled": bool(self.decision_url), "endpoint": "/v1/decision",
+                         "backend": self.decision_url or None},
             "vision": {"enabled": images, "available": images, "error": None},
             "activity": {"requests": totals["requests"] + int(busy), "in_flight": int(busy) + int(s.get("queued") or 0),
                          "last_request_at": int(last_at) if last_at else None},
@@ -4691,6 +4698,8 @@ def make_handler(svc: Service):
                     self._anthropic(req)
                 elif path == "/v1/messages/count_tokens":
                     self._count_tokens(req)
+                elif path == "/v1/decision":
+                    self._decision(req)
                 else:
                     self._json(404, {"error": {"message": "not found"}})
             except ValueError as e:
@@ -4736,6 +4745,58 @@ def make_handler(svc: Service):
                         record["finished_at"] = time.time()
                         record["state"] = "error" if record.get("error") else record.get("outcome", "completed")
                     svc.request_trace.record = None
+
+        def _decision(self, req):
+            """/v1/decision (Jev mode): answer a finite JSON schema - every field picked from its allowed values with
+            a probability - in one batched pass on the decision backend.  Strata's own engine answers one sequence at
+            a time; the parallel branch scoring lives in llama-server from the parallel-decision branch
+            (github.com/thecodacus/llama.cpp, started with --decision-seqs N).  This endpoint forwards the request to
+            that server ("decision_url" in the config / --decision-url / $STRATA_DECISION_URL) and passes its answer
+            through unchanged: {results: [{decision, fields, usage}], usage, timings}.  It never touches Strata's
+            engine or queue - a decision runs while the big model is idle, loading, or mid-chat on another client.
+            docs/JEV_MODE.md."""
+            url = svc.decision_url
+            if not url:
+                self._json(503, {"error": {
+                    "type": "decision_backend_missing",
+                    "message": ("no decision backend is set: start llama-server from the parallel-decision branch with "
+                                "--decision-seqs N and name it in Strata (config \"decision_url\": "
+                                "\"http://127.0.0.1:8096\", or --decision-url, or $STRATA_DECISION_URL) - "
+                                "docs/JEV_MODE.md")}})
+                return
+            contexts = req.get("contexts")
+            if not isinstance(contexts, list) or not (1 <= len(contexts) <= 256) \
+                    or not all(isinstance(c, str) for c in contexts):
+                self._json(400, {"error": {"type": "invalid_request_error",
+                                           "message": "\"contexts\" must be a list of 1-256 strings"}})
+                return
+            if not isinstance(req.get("schema"), dict):
+                self._json(400, {"error": {"type": "invalid_request_error",
+                                           "message": "\"schema\" must be an object of finite fields (enum/boolean/"
+                                                     "integer/number)"}})
+                return
+            body = json.dumps(req).encode()
+            target = url.rstrip("/") + "/v1/decision"
+            rq = urllib.request.Request(target, data=body, method="POST",
+                                        headers={"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(rq, timeout=svc.decision_timeout_s) as resp:
+                    raw, code = resp.read(), resp.status
+            except urllib.error.HTTPError as e:                 # the backend answered an error - pass it through
+                raw, code = e.read(), e.code
+            except (urllib.error.URLError, TimeoutError, OSError) as e:
+                self._json(503, {"error": {
+                    "type": "decision_backend_unavailable",
+                    "message": f"the decision backend at {target} did not answer ({getattr(e, 'reason', e)}): start it "
+                               "with llama-server --decision-seqs N on that address"}})
+                return
+            try:
+                obj = json.loads(raw)
+            except ValueError:
+                self._json(502, {"error": {"type": "decision_backend_error",
+                                           "message": f"the decision backend answered HTTP {code} with non-JSON"}})
+                return
+            self._json(code, obj)
 
         def _props(self):
             model = parse_qs(urlsplit(self.path).query).get("model", [svc.model])[0]
@@ -5650,6 +5711,10 @@ def main() -> int:
     ap.add_argument("--slot-save-path", default=None, metavar="DIR",
                     help="enable POST /slots/0?action=save|restore {\"filename\": NAME} (llama-server's API): the "
                          "conversation the engine holds, to or from DIR/NAME (also \"slot_save_path\" in the config)")
+    ap.add_argument("--decision-url", default=None,
+                    help="/v1/decision (Jev mode) proxies to this llama-server: the parallel-decision branch, started "
+                         "with --decision-seqs N (also \"decision_url\" in the config, $STRATA_DECISION_URL; "
+                         "docs/JEV_MODE.md)")
     a = ap.parse_args()
     cfg = json.loads(Path(a.config).read_text(encoding="utf-8-sig")) if a.config else {}   # Notepad adds a BOM
     if a.gpu is not None:
@@ -5767,6 +5832,16 @@ def main() -> int:
     if svc.allowed_hosts:
         print("[strata] Host check off: any name reaches this server (allowed_hosts \"*\")" if "*" in svc.allowed_hosts
               else f"[strata] also answers to the host names {', '.join(svc.allowed_hosts)} (allowed_hosts)", flush=True)
+    # Jev mode (/v1/decision): the proxied decision backend; empty = the endpoint answers 503 with setup help
+    svc.decision_url = ((a.decision_url or cfg.get("decision_url") or os.environ.get("STRATA_DECISION_URL", ""))
+                        .strip().rstrip("/"))
+    try:
+        svc.decision_timeout_s = float(cfg.get("decision_timeout_s") or 120)
+    except (TypeError, ValueError):
+        raise SystemExit(f"[strata] config decision_timeout_s must be a number of seconds")
+    if svc.decision_url:
+        print(f"[strata] Jev mode on: /v1/decision -> {svc.decision_url}/v1/decision "
+              "(a llama-server from the parallel-decision branch; docs/JEV_MODE.md)", flush=True)
     svc.api_monitor = a.api_monitor or cfg.get("api_monitor") is True
     if svc.api_monitor:
         print("[strata] API request monitor on (/api-monitor): the last 100 requests' prompts and answers are kept in "

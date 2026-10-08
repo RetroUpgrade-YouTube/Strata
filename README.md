@@ -13,6 +13,69 @@ Strata runs **[Qwen3.8-Flash-Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Nex
 large, smart AI model that usually needs a server. It chats, writes code, reads pictures and works with your apps
 and coding agents. Nothing leaves your PC.
 
+## Jev mode - answers that choose instead of write (this fork)
+
+**Jev mode** is a second way to ask the model things. You give it *the current situation as text* plus
+a small **schema** - questions whose every answer must be picked from a fixed list (yes/no, low/medium/high,
+0-90, up/down/left...) - and it answers **every question at once**, each with a confidence score. It does not
+write paragraphs: it *decides*, in tens of milliseconds.
+
+```text
+You send      instructions + schema (the questions and their allowed answers) + the situation text
+You get back  { category: "billing" (98%), urgent: true (99.9%), priority: "critical" (82%) } - in ~30 ms
+```text
+
+It is the `/v1/decision` endpoint from Codacus' llama.cpp `parallel-decision` branch (the Jev-mode fork,
+[video](https://www.youtube.com/watch?v=bcGO7xre46o)): every allowed answer is scored as a token path in one
+batched pass, so all fields come back together and the JSON can never be malformed. This fork of Strata
+serves that endpoint from Strata's own address (`http://127.0.0.1:8080/v1/decision`) and forwards it to a
+small llama.cpp server on your spare VRAM:
+
+```text
+your app / the decision playground ->  Strata :8080  ->  small decision model :8096 (llama.cpp fork)
+                                          |   the big chat model is NOT touched - no queue, no unloading;
+                                          |   chat keeps running while decisions answer in ~30 ms
+```text
+
+### Start it (3 steps)
+
+1. `start-jev-backend.bat` - starts the decision backend (a 2B model on ~2.5 GB VRAM, port 8096). Keep its window open.
+2. `START-HERE.bat` - Strata as always; it already points at the backend (`"decision_url": "http://127.0.0.1:8096"`).
+3. Ask:
+
+   ```bash
+   curl http://127.0.0.1:8080/v1/decision -H "Content-Type: application/json" -d '{
+     "instructions": "Answer each question about this support request from its state.",
+     "schema": {
+       "category": {"type": "enum", "choices": ["billing","technical","cancellation","other"]},
+       "urgent":   {"type": "boolean"},
+       "priority": {"type": "enum", "choices": ["low","medium","high","critical"]}
+     },
+     "contexts": ["I was charged twice and need this fixed today."]
+   }'
+   ```text
+
+   Every field answers with its probability. Send 1-256 `contexts` in one request - they share the cached
+   prefix, so a batch costs about one decision each.
+
+### What you can change
+
+| Setting | Where | What it does |
+| --- | --- | --- |
+| `decision_url` | run config (`strata-<model>.json`) / `--decision-url` / env `STRATA_DECISION_URL` | where `/v1/decision` is sent; empty = the endpoint answers 503 with setup help |
+| `decision_timeout_s` | run config (default 120) | how long one proxied decision request may take |
+| `cors_origins` | run config | browser pages allowed to call the API (the playground's `http://localhost:5173` is pre-set) |
+| backend model / VRAM | edit `start-jev-backend.bat`: `-m <model.gguf>`, `-c 16384` (context), `--decision-seqs 24` (questions scored in parallel; lower it on busy cards, e.g. 12) | the decision model is yours to pick - small attention-only models score fastest, hybrid models work with a few extra passes |
+| playground target | `VITE_DEFAULT_SERVER=http://127.0.0.1:8080 npm run dev` in [decision-playground](https://github.com/thecodacus/decision-playground) | try presets, compare decision vs chat side by side, play the arena game |
+
+Per-request knobs (in the JSON body): `mode` (`auto` / `tree` exact probabilities / `greedy`), `tree_max`,
+`cache_prompt`; numeric fields take `aggregate`: `mode` / `mediaan` / `mean`. Full API + design notes:
+[docs/JEV_MODE.md](docs/JEV_MODE.md).
+
+**Good uses:** game agents and bots, ticket routing, triage, moderation flags, smart-home rules - any job that
+is "look at the state, pick from the list". **Know:** schema values must be finite (no free text); a low
+probability is honest uncertainty, not a bug; Strata's API key rule applies to `/v1/decision` too.
+
 ## How fast is it?
 
 We measured it on two ordinary gaming PCs. A token is about ¾ of a word.

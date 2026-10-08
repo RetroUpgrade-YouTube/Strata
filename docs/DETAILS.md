@@ -643,6 +643,7 @@ The server listens on `http://127.0.0.1:8080` (change with `--port` in setup, or
 | OpenAI Chat Completions (stream and non-stream, tools) | `POST /v1/chat/completions` |
 | Anthropic Messages (stream and non-stream, tools) | `POST /v1/messages` |
 | OpenAI Responses (stream and non-stream, tools; stateless, [below](#the-responses-api-and-codex-cli)) | `POST /v1/responses` |
+| Jev mode - a finite schema answered field-by-field with probabilities in one batched pass ([JEV_MODE.md](JEV_MODE.md)) | `POST /v1/decision` (proxied to the parallel-decision backend; listed in `/v1/status` when set) |
 | Model list / health | `GET /v1/models`, `GET /models`, `GET /health` |
 | Model properties | `GET /props` (also accepts `?model=<loaded-model-id>`) |
 | What the model is doing right now | `GET /status`, `GET /slots` (busy or idle, with `n_prompt_tokens`; one entry per slot with `--batch`) |
