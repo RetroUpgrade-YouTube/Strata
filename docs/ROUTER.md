@@ -77,3 +77,23 @@ stays Strata; pick a swarm model when starting a quick-task session.
 - config: `D:\AI\llama_swap\config.yaml` — edit + restart, llama-swap watches/reloads
 - start: `& 'D:\AI\llama_swap\bin\llama-swap.exe' -config 'D:\AI\llama_swap\config.yaml' --listen localhost:8081`
 - test helpers: `test_chat.ps1`, `show_logs.ps1`, `test_jev.ps1` (same folder)
+
+## ComfyUI MCP for agents (`mcp__comfyui__*`)
+
+`tools/comfyui_mcp.py` - stdlib-only MCP server (no pip install), registered by DSH preset
+**"ComfyUI media studio"** (`~/.dsh/.agent-presets/comfyui/`). Tools: `comfy_status`,
+`comfy_start`, `comfy_stop`, `comfy_queue` (API-format workflow JSON -> prompt_id),
+`comfy_result` (wait + output file list under the ComfyUI `output` folder - feed straight to
+image/vision review), `comfy_queue_status`. All requests go through `:8081/comfyui/`, so the
+matrix swap rules are automatic: queueing media evicts LLMs; the next LLM request unloads ComfyUI.
+
+Verified flow (this PC): router boots portable ComfyUI from D: in ~30 s, `/running` shows
+`comfyui_auto ready`, unload returns VRAM instantly. Nothing to start by hand - llama-swap owns
+the process; the codacus llama.cpp server is launched per model request the same way.
+
+## Starting things at boot
+
+- Router: autostarts at logon (Startup-folder shortcut -> `D:\AI\llama_swap\start-router.bat`, guarded against double-start).
+- Strata: start as usual when you want the big agent; Jev reflex backend = `C:\AI\Strata-Jev\start-jev-backend.bat`.
+- LM Studio's server (:1234) and the router should not both hold models - pick one.
+
